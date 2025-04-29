@@ -1,162 +1,124 @@
 import asyncio
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.types import InlineKeyboardButton
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.client.default import DefaultBotProperties
+import re
+import os
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import CommandStart, Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.filters import StateFilter
+from dotenv import load_dotenv
 
-TOKEN = "7803071379:AAEAVfw7__d7ncefEjQE5nEFw3i4MKc6X0U"
+from dp import create_dp, save_user, init_pool
 
-bot = Bot(
-    token=TOKEN,
-    default=DefaultBotProperties(parse_mode="HTML")
-)
+load_dotenv()
+
+TOKEN = os.getenv("BOT_TOKEN", "7803071379:AAHwvsNTAESwXp6qFjS5nBswT3dMMqGl8ZM")
+
+bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-products = [
-    {"name": "🍎 Olma", "price": 12000},
-    {"name": "🍌 Banan", "price": 15000},
-    {"name": "🍇 Uzum", "price": 20000},
-    {"name": "🍑 Shaftoli", "price": 14000},
-    {"name": "🍒 Gilos", "price": 25000},
-    {"name": "🍍 Ananas", "price": 28000},
-    {"name": "🥑 Avokado", "price": 30000},
-    {"name": "🥭 Mango", "price": 27000},
-    {"name": "🍋 Limon", "price": 13000},
-    {"name": "🍊 Mandarin", "price": 16000},
-]
+class UserForm(StatesGroup):
+    ism = State()
+    tel_nomer = State()
+    yosh = State()
+    qayerliki = State()
+    ish_joyi = State()
 
-ITEMS_PER_PAGE = 5
+def is_valid_name(name: str) -> bool:
+    return bool(re.match(r"^[a-zA-Zа-яА-ЯёЁ\s]{3,}$", name.strip()))
 
-def start_menu():
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text="🛒 Mahsulotlar",
-        callback_data="products:0"
-    )
-    builder.adjust(1)
-    return builder.as_markup()
+def is_valid_phone(phone: str) -> bool:
+    return bool(re.match(r"^\+998[0-9]{9}$", phone))
 
-def product_list_keyboard(page: int = 0):
-    start = page * ITEMS_PER_PAGE
-    end = start + ITEMS_PER_PAGE
-    page_items = products[start:end]
+def is_valid_age(age: str) -> bool:
+    return age.isdigit() and 1 <= int(age) <= 150
 
-    builder = InlineKeyboardBuilder()
+def is_valid_qayerliki(q: str) -> bool:
+    return len(q.strip()) >= 5
 
-    for idx, item in enumerate(page_items, start=start):
-        builder.button(
-            text=f"{item['name']} - {item['price']:,} so'm",
-            callback_data=f"select:{idx}"
-        )
+def is_valid_ish_joyi(i: str) -> bool:
+    return bool(re.match(r"^[a-zA-Zа-яА-ЯёЁ\s]{3,}$", i.strip()))
 
-    builder.adjust(1)
+@dp.message(CommandStart())
+async def start(message: types.Message, state: FSMContext):
+    await message.answer("👋 Salom! Iltimos, ismingizni kiriting (masalan: Ali Valiyev):")
+    await state.set_state(UserForm.ism)
 
-    navigation = []
-    if page > 0:
-        navigation.append(InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"products:{page - 1}"))
-    navigation.append(InlineKeyboardButton(text="🏠 Bosh sahifa", callback_data="home"))
-    if end < len(products):
-        navigation.append(InlineKeyboardButton(text="➡️ Keyingi", callback_data=f"products:{page + 1}"))
+@dp.message(Command("cancel"))
+async def cancel(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("❌ Jarayon bekor qilindi.")
 
-    builder.row(*navigation)
+@dp.message(StateFilter(UserForm.ism))
+async def get_ism(message: types.Message, state: FSMContext):
+    if not is_valid_name(message.text):
+        await message.answer("❌ Ism noto‘g‘ri. Faqat harflar va probel bo‘lishi kerak, kamida 3 belgi. Qayta kiriting:")
+        return
+    await state.update_data(ism=message.text.strip())
+    await message.answer("📞 Telefon raqamingizni kiriting (masalan: +998901234567):")
+    await state.set_state(UserForm.tel_nomer)
 
-    return builder.as_markup()
+@dp.message(StateFilter(UserForm.tel_nomer))
+async def get_tel(message: types.Message, state: FSMContext):
+    if not is_valid_phone(message.text):
+        await message.answer("❌ Telefon raqam noto‘g‘ri. +998 bilan boshlanishi va 9 ta raqam bo‘lishi kerak. Qayta kiriting:")
+        return
+    await state.update_data(tel_nomer=message.text.strip())
+    await message.answer("🎂 Yoshingizni kiriting (1-150):")
+    await state.set_state(UserForm.yosh)
 
-@dp.message(Command("start"))
-async def start_handler(message: types.Message):
+@dp.message(StateFilter(UserForm.yosh))
+async def get_yosh(message: types.Message, state: FSMContext):
+    if not is_valid_age(message.text):
+        await message.answer("❌ Yosh noto‘g‘ri. 1 dan 150 gacha raqam kiriting. Qayta kiriting:")
+        return
+    await state.update_data(yosh=message.text.strip())
+    await message.answer("🏠 Qayerliksiz (kamida 5 belgi):")
+    await state.set_state(UserForm.qayerliki)
+
+@dp.message(StateFilter(UserForm.qayerliki))
+async def get_qayerliki(message: types.Message, state: FSMContext):
+    if not is_valid_qayerliki(message.text):
+        await message.answer("❌ Ma’lumot noto‘g‘ri. Kamida 5 belgi kiriting. Qayta kiriting:")
+        return
+    await state.update_data(qayerliki=message.text.strip())
+    await message.answer("💼 Ish joyingiz (masalan: O‘qituvchi):")
+    await state.set_state(UserForm.ish_joyi)
+
+@dp.message(StateFilter(UserForm.ish_joyi))
+async def get_ish_joyi(message: types.Message, state: FSMContext):
+    if not is_valid_ish_joyi(message.text):
+        await message.answer("❌ Ish joyi noto‘g‘ri. Faqat harflar va probel, kamida 3 belgi. Qayta kiriting:")
+        return
+    await state.update_data(ish_joyi=message.text.strip())
+    data = await state.get_data()
+    try:
+        await save_user(data, message.from_user.id)
+    except ValueError as e:
+        await message.answer(f"❌ Xato: {str(e)}")
+        await state.clear()
+        return
+    except Exception:
+        await message.answer("❌ Ma'lumotlarni saqlashda xato yuz berdi. Iltimos, qayta urinib ko‘ring.")
+        return
+
     await message.answer(
-        "<b>Assalomu alaykum SATURN MARKETGA hush kelibsiz!</b>\n\n🛒 Mahsulotlarni ko'rish uchun tugmani bosing:",
-        reply_markup=start_menu()
+        "✅ Ma'lumotlaringiz saqlandi!\n"
+        f"👤 Ism: {data['ism']}\n"
+        f"📞 Tel: {data['tel_nomer']}\n"
+        f"🎂 Yosh: {data['yosh']}\n"
+        f"🏠 Qayerliki: {data['qayerliki']}\n"
+        f"💼 Ish joyi: {data['ish_joyi']}"
     )
-
-@dp.callback_query(F.data.startswith("products:"))
-async def products_handler(callback: types.CallbackQuery):
-    page = int(callback.data.split(":")[1])
-    await callback.message.edit_text(
-        "<b>🛍 Mahsulotlar ro'yxati:</b>",
-        reply_markup=product_list_keyboard(page)
-    )
-    await callback.answer()
-
-@dp.callback_query(F.data.startswith("select:"))
-async def product_select_handler(callback: types.CallbackQuery):
-    product_idx = int(callback.data.split(":")[1])
-    item = products[product_idx]
-
-    builder = InlineKeyboardBuilder()
-
-    for kg in [10, 20, 30, 40, 50]:
-        builder.button(
-            text=f"{kg} kg - {item['price'] * kg} so'm",
-            callback_data=f"buy:{product_idx}:{kg}"
-        )
-
-    builder.row(
-        InlineKeyboardButton(text="❌ Bekor qilish", callback_data="home")
-    )
-    builder.row(
-        InlineKeyboardButton(text="🔙 Orqaga", callback_data=f"products:{callback.data.split(':')[1]}")
-    )
-
-    await callback.message.edit_text(
-        f"Siz <b>{item['name']}</b> mahsulotini tanladingiz.\n"
-        f"Mahsulot narxi: <b>{item['price']} so'm</b>\n\n"
-        "Iltimos, qancha kilogramm sotib olishni tanlang:",
-        reply_markup=builder.as_markup()
-    )
-    await callback.answer()
-
-@dp.callback_query(F.data.startswith("buy:"))
-async def buy_handler(callback: types.CallbackQuery):
-    product_idx, kg = map(int, callback.data.split(":")[1:])
-    item = products[product_idx]
-    total_price = item["price"] * kg
-
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text="💳 To'lash",
-        callback_data=f"pay:{product_idx}:{kg}"
-    )
-    builder.row(
-        InlineKeyboardButton(text="❌ Bekor qilish", callback_data="home")
-    )
-
-    await callback.message.edit_text(
-        f"Siz <b>{kg} kg {item['name']}</b> mahsulotini tanladingiz.\n"
-        f"Jami narx: <b>{total_price} so'm</b>\n\n"
-        "To'lovni amalga oshirish uchun 'To'lash' tugmasini bosing.",
-        reply_markup=builder.as_markup()
-    )
-    await callback.answer()
-
-@dp.callback_query(F.data.startswith("pay:"))
-async def pay_handler(callback: types.CallbackQuery):
-    product_idx, kg = map(int, callback.data.split(":")[1:])
-    item = products[product_idx]
-    total_price = item["price"] * kg
-
-    await callback.message.answer(
-        f"✅ To'lov muvaffaqiyatli amalga oshirildi yanna SATURN MARKETGA kelib turing!\n"
-        f"Siz <b>{kg} kg {item['name']}</b> mahsulotini sotib oldingiz.\n"
-        f"💰 Jami: <b>{total_price} so'm</b>\n\n"
-        "🛒 Yana mahsulotlarni sotib olish uchun /start buyrug'ini bosing.",
-        reply_markup=start_menu()
-    )
-    await callback.answer()
-
-@dp.callback_query(F.data == "home")
-async def home_handler(callback: types.CallbackQuery):
-    await callback.message.edit_text(
-        "<b>Assalomu alaykum hush kelibsiz SATURN MARKETGA 70/75!</b>\n\n🛒 Mahsulotlarni ko'rish uchun tugmani bosing:",
-        reply_markup=start_menu()
-    )
-    await callback.answer()
+    await state.clear()
 
 async def main():
-    await dp.start_polling(bot)
+    try:
+        await init_pool()
+        await create_dp()
+        await dp.start_polling(bot)
+    except Exception as e:
+        print(f"Bot startup error: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-# SATURN HIZMATDA
